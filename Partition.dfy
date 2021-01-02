@@ -3,12 +3,13 @@
 method Partition (A : array<int>, s : int, l : int, X : int) returns (m : int, n : int)
   modifies A
   requires 0 <= s <= l <= A.Length
+  /* Ensures *m* and *n* are inside the segment */
   ensures s <= m <= n <= l
   ensures forall i :: s <= i < m ==> A[i] < X
   ensures forall i :: m <= i < n ==> A[i] == X
   ensures forall i :: n <= i < l ==> A[i] > X
-  ensures A[..s] == old(A[..s])
-  ensures A[l..] == old(A[l..])
+  /* All the other elements should be left unchanged */
+  ensures (A[..s] == old(A[..s])) && (A[l..] == old(A[l..]))
   ensures multiset(A[..]) == multiset(old(A[..]))
 {
   var w := s;
