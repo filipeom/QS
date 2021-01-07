@@ -65,7 +65,7 @@ class OkState
 
 class FileSystemState
 {
-    constructor{ :axiom} () requires false;
+    constructor{:axiom} () requires false;
     function {:axiom} state() : map<seq<char>,seq<byte>>   // File system maps file names (sequences of characters) to their contents
         reads this;
 }

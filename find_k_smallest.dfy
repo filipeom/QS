@@ -7,9 +7,227 @@
  */
 
 include "Io.dfy"
+include "Find.dfy"
+
+function method power(b:int, e:nat):int
+{
+	if (e==0) then 1 else b * power(b,e-1)
+}
+
+method atoi(s : seq<char>) returns (n : int)
+  requires |s| > 0;
+{
+  n := 0;
+  var i := |s| - 1;
+  while i >= 0 {
+    n := n + power(10, |s| - i - 1) * ((s[i] as int) - 48);
+    i := i - 1;
+  }
+}
+
+method {:verify false} itoa(n : int) returns (s : seq<char>)
+{
+  var n', i, j, len;
+
+  /* find str len */
+  n', len := n, 0;
+  while n' != 0 {
+    n' := n' / 10;
+    len := len + 1;
+  }
+
+  /* allocate space for string */
+  var a := new char[len];
+
+  /* convert int into string */
+  n', i := n, 0;
+  while n' != 0 {
+    a[i] := (n'%10 + 48) as char;
+    n' := n' / 10;
+  }
+
+  /* reverse string */
+  i := 0;
+  while i < len/2 { 
+    j := len - i - 1;
+    a[i], a[j] := a[j], a[i];
+    i := i + 1;
+  }
+  s := a[..];
+}
+
+method get_line(b : array<byte>, o : int) returns (k : int, s : seq<char>)
+  requires 0 <= o < b.Length;
+  requires exists i :: o <= i < b.Length && (b[i] == 0x0A);
+
+  ensures 0 <= o <= k <= b.Length;
+{
+  k := o;
+  while b[k] != 0x0A && k < b.Length
+    invariant 0 <= o <= k < b.Length;
+    invariant exists i :: o <= k <= i < b.Length && (b[i] == 0x0A);
+
+    decreases b.Length - k;
+  {
+    s := s + [b[k] as char];
+    k := k + 1;
+  }
+  k := k + 1;
+}
+
+method {:verify false} deserialize_array(b : array<byte>)
+    returns (a' : array<int>)
+  ensures fresh(a')
+  ensures a'.Length > 0
+{
+  var a;
+  var i, line;
+
+  /* parse array into seq a */
+  i := 0;
+  while i < b.Length {
+    i, line := get_line(b, i);
+    var n := atoi(line);
+    a := a + [n];
+  }
+  /* create output array */
+  a' := new int[|a|];
+  /* cpy seq a into output array a'*/
+  i := 0; 
+  while i < |a| {
+    a'[i] := a[i];
+    i := i + 1;
+  }
+}
+
+method {:verify false} serialize_array(A : array<int>, b : array<byte>)
+  modifies b;
+{
+  var len, str;
+  var i, i', i'';
+
+  i, i', len := 0, 0, A.Length;
+  while i < len {
+    /* get string repr of int */
+    str := itoa(A[i]);
+    /* write to b as a byte */
+    i'' := 0;
+    while i'' < |str| {
+      b[i'] := str[i''] as byte;
+      i', i'' := i' + 1, i'' + 1;
+    }
+    /* newline */
+    b[i'] := 0x0A;
+    i' := i' + 1;
+    i := i + 1;
+  }
+}
+
+method find_k_smallest(ghost env:HostEnvironment, K : array<char>, src_path : array<char>, 
+src : FileStream, dst : FileStream) returns (ret : bool)
+  requires env.Valid() && env.ok.ok();
+  requires K.Length > 0;
+  requires src_path[..] == src.Name();
+  requires src.Name() in env.files.state() && dst.Name() in env.files.state();
+  requires env == src.env == dst.env;
+  requires env.ok == src.env.ok == dst.env.ok
+  requires env.files == src.env.files == dst.env.files
+  requires src.IsOpen() && dst.IsOpen();
+  requires src != dst;
+  requires env.files.state()[dst.Name()] == [];
+  modifies env, env.files, env.ok, src, dst, src.env, src.env.ok, src.env.files;
+{
+  var ok, len := FileStream.FileLength(src_path, env);
+  if !ok {
+    print "[Err] Unable to find length of src.\n";
+    return false;
+  }
+
+  var b := new byte[len];
+  ok := src.Read(0, b, 0, len);
+  if !ok {
+    print "[Err] Unable to read data from src.\n";
+    return false;
+  }
+  assert b[..] == old(env.files.state()[src_path[..]]);
+  
+  var A := deserialize_array(b);
+
+  var K' := atoi(K[..]);
+  if K' < 1 || K' > A.Length {
+    print "[Err] Invalid K value.\n";
+    return false;
+  }
+
+  var s, l := Find(A, K');
+
+  serialize_array(A, b);
+
+  ok := dst.Write(0, b, 0, len);
+  if !ok {
+    print "[Err] Unable to write into dst file.\n";
+    return false;
+  }
+  assert b[..] == env.files.state()[dst.Name()];
+
+  ok := src.Close();
+  if !ok {
+    print "[Err] Unable to close the src stream.\n";
+    return false;
+  }
+
+  ok := dst.Close();
+  if !ok {
+    print "[Err] Unable to close the dst stream.\n";
+    return false;
+  }
+
+  return true;
+}
 
 method {:main} Main(ghost env:HostEnvironment?)
   requires env != null && env.Valid() && env.ok.ok();
+  modifies env, env.files, env.ok;
 {
-  print "TODO!\n";  
+  var arg_num := HostConstants.NumCommandLineArgs(env);
+  if arg_num < 4 {
+    print "Usage: find_k_smallest.exe K <src_path> <dst_path>\n";
+    return;
+  }
+  
+  var K        := HostConstants.GetCommandLineArg(1, env);
+  var src_path := HostConstants.GetCommandLineArg(2, env);
+  var dst_path := HostConstants.GetCommandLineArg(3, env);
+
+  if K.Length <= 0 {
+    print "[Err] Invalid K value.\n";
+    return;
+  }
+
+  var src_exists := FileStream.FileExists(src_path, env);
+  if !src_exists {
+    print "[Err] src file \"", src_path, "\" not found.\n";
+    return;
+  }
+
+  var dst_exists := FileStream.FileExists(dst_path, env);
+  if dst_exists {
+    print "[Err] dst file \"", dst_path, "\" in use.\n";
+    return;
+  }
+
+  var ok, src_stream := FileStream.Open(src_path, env);
+  if !ok {
+    print "[Err] Unable to open src file.\n";
+    return;
+  }
+
+  var dst_stream;
+  ok, dst_stream := FileStream.Open(dst_path, env);
+  if !ok {
+    print "[Err] Unable to open dst file.\n";
+    return;
+  }
+
+  ok := find_k_smallest(env, K, src_path, src_stream, dst_stream);
 }
