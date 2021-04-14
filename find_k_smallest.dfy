@@ -25,13 +25,22 @@ method atoi(s : seq<char>) returns (n : int)
   }
 }
 
-method {:verify false} itoa(n : int) returns (s : seq<char>)
+method itoa(n : int) returns (s : seq<char>)
+  ensures forall i :: 0 <= i < |s| ==> ('0' <= s[i] <= '9');
 {
-  var n', i, j, len;
+  var n', i, len;
 
+  /* if n' is >= 0 proving termination is trivial */
+  if (n < 0) { 
+    n' := -n;
+  } else {
+    n' := n;
+  }
   /* find str len */
-  n', len := n, 0;
-  while n' != 0 {
+  len := 0;
+  while n' != 0 
+    invariant n' >= 0;
+  {
     n' := n' / 10;
     len := len + 1;
   }
@@ -41,54 +50,71 @@ method {:verify false} itoa(n : int) returns (s : seq<char>)
 
   /* convert int into string */
   n', i := n, 0;
-  while n' != 0 {
+  while i < len
+    invariant 0 <= i <= len;
+    invariant forall k :: 0 <= k < i <= len ==> ('0' <= a[k] <= '9');
+  {
     a[i] := (n'%10 + 48) as char;
     n' := n' / 10;
+    i := i + 1;
   }
 
   /* reverse string */
   i := 0;
-  while i < len/2 { 
-    j := len - i - 1;
+  while i < len/2 
+    invariant 0 <= i <= len/2;
+    invariant forall k :: 0 <= k < len ==> ('0' <= a[k] <= '9');
+  { 
+    var j := len - i - 1;
     a[i], a[j] := a[j], a[i];
     i := i + 1;
   }
   s := a[..];
+  assert forall i :: 0 <= i < len ==> ('0' <= s[i] <= '9');
 }
 
 method get_line(b : array<byte>, o : int) returns (k : int, s : seq<char>)
-  requires 0 <= o < b.Length;
-  requires exists i :: o <= i < b.Length && (b[i] == 0x0A);
-
-  ensures 0 <= o <= k <= b.Length;
+  requires b.Length > 0;
+  requires 0 <= o < b.Length
+  ensures 0 <= o < k <= b.Length;
 {
+  s := [];
   k := o;
-  while b[k] != 0x0A && k < b.Length
-    invariant 0 <= o <= k < b.Length;
-    invariant exists i :: o <= k <= i < b.Length && (b[i] == 0x0A);
-
+  while k < b.Length && b[k] != 0x0A
+    invariant 0 <= o <= k <= b.Length;
+    invariant k-o == |s|;
+    invariant |s| >= 0;
     decreases b.Length - k;
   {
     s := s + [b[k] as char];
     k := k + 1;
   }
-  k := k + 1;
+  /* if we can, move index to start of newline */
+  if k < b.Length {
+    k := k + 1;
+  }
 }
 
-method {:verify false} deserialize_array(b : array<byte>)
+method deserialize_array(b : array<byte>)
     returns (a' : array<int>)
+  requires b.Length > 0;
   ensures fresh(a')
-  ensures a'.Length > 0
 {
   var a;
   var i, line;
 
   /* parse array into seq a */
   i := 0;
-  while i < b.Length {
+  while i < b.Length 
+    invariant 0 <= i <= b.Length;
+    decreases b.Length-i;
+  {
     i, line := get_line(b, i);
-    var n := atoi(line);
-    a := a + [n];
+    /* ignore empty lines */
+    if |line| > 0 {
+      var n := atoi(line);
+      a := a + [n];
+    }
   }
   /* create output array */
   a' := new int[|a|];
@@ -100,31 +126,40 @@ method {:verify false} deserialize_array(b : array<byte>)
   }
 }
 
-method {:verify false} serialize_array(A : array<int>, b : array<byte>)
+method serialize_array(a : array<int>, b : array<byte>)
+  requires a.Length > 0 && b.Length > 0;
   modifies b;
 {
-  var len, str;
-  var i, i', i'';
+  var len, s;
+  var ai, bi, si;
 
-  i, i', len := 0, 0, A.Length;
-  while i < len {
+  ai, bi, len := 0, 0, a.Length;
+  while (ai < len) && (bi < b.Length)
+    invariant 0 <= ai <= a.Length;
+    invariant 0 <= bi <= b.Length;
+  {
     /* get string repr of int */
-    str := itoa(A[i]);
+    s := itoa(a[ai]);
     /* write to b as a byte */
-    i'' := 0;
-    while i'' < |str| {
-      b[i'] := str[i''] as byte;
-      i', i'' := i' + 1, i'' + 1;
+    si := 0;
+    while (si < |s|) && (bi < b.Length)
+      invariant 0 <= si <= |s|;
+      invariant 0 <= bi <=  b.Length;
+    {
+      b[bi] := s[si] as byte; 
+      bi, si := bi + 1, si + 1;
     }
     /* newline */
-    b[i'] := 0x0A;
-    i' := i' + 1;
-    i := i + 1;
+    if (bi < b.Length) {
+      b[bi] := 0x0A;
+      bi := bi + 1;
+    }
+    ai := ai + 1;
   }
 }
 
 method find_k_smallest(ghost env:HostEnvironment, K : array<char>, src_path : array<char>, 
-src : FileStream, dst : FileStream) returns (ret : bool)
+src : FileStream, dst : FileStream) returns (success : bool, A : array?<int>)
   requires env.Valid() && env.ok.ok();
   requires K.Length > 0;
   requires src_path[..] == src.Name();
@@ -136,53 +171,63 @@ src : FileStream, dst : FileStream) returns (ret : bool)
   requires src != dst;
   requires env.files.state()[dst.Name()] == [];
   modifies env, env.files, env.ok, src, dst, src.env, src.env.ok, src.env.files;
+  ensures A != null ==> env.ok != null && env.ok.ok() == true && A.Length > 0;
+  ensures success ==> A != null && A.Length > 0;
 {
   var ok, len := FileStream.FileLength(src_path, env);
   if !ok {
     print "[Err] Unable to find length of src.\n";
-    return false;
+    return false, null;
+  }
+
+  if len <= 1 {
+    print "[Err] File to small\n";
+    return false, null;
   }
 
   var b := new byte[len];
   ok := src.Read(0, b, 0, len);
   if !ok {
     print "[Err] Unable to read data from src.\n";
-    return false;
+    return false, null;
   }
   assert b[..] == old(env.files.state()[src_path[..]]);
-  
-  var A := deserialize_array(b);
+
+  A := deserialize_array(b);
+  if A.Length == 0 {
+    print "[Err] Unable to parse array.\n";
+    return false, null;
+  }
 
   var K' := atoi(K[..]);
   if K' < 1 || K' > A.Length {
     print "[Err] Invalid K value.\n";
-    return false;
+    return false, null;
   }
 
   var s, l := Find(A, K');
-
   serialize_array(A, b);
 
   ok := dst.Write(0, b, 0, len);
   if !ok {
     print "[Err] Unable to write into dst file.\n";
-    return false;
+    return false, null;
   }
   assert b[..] == env.files.state()[dst.Name()];
 
   ok := src.Close();
   if !ok {
-    print "[Err] Unable to close the src stream.\n";
-    return false;
+    print "Failed to close the src file: ", src, "\n";
+    return false, null;
   }
-
+	
   ok := dst.Close();
   if !ok {
-    print "[Err] Unable to close the dst stream.\n";
-    return false;
+    print "Failed to close the dst file: ", dst, "\n";
+    return false, null;
   }
-
-  return true;
+ 
+  return true, A;
 }
 
 method {:main} Main(ghost env:HostEnvironment?)
@@ -229,5 +274,6 @@ method {:main} Main(ghost env:HostEnvironment?)
     return;
   }
 
-  ok := find_k_smallest(env, K, src_path, src_stream, dst_stream);
+  var A;
+  ok, A := find_k_smallest(env, K, src_path, src_stream, dst_stream);
 }

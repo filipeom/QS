@@ -1,43 +1,5 @@
 /* Challenge 1 */
 
-//method Partition(A : array<int>, s : int, l : int, X : int) returns (m : int, n : int)
-//  requires 0 <= s <= l <= A.Length
-//  modifies A;
-//  /* Expected behaviour */
-//  ensures s <= m <= n <= l
-//  ensures forall i :: s <= i < m ==> A[i] < X;
-//  ensures forall i :: m <= i < n ==> A[i] == X;
-//  ensures forall i :: n <= i < l ==> A[i] > X;
-//  /* No unexpected changes occured */
-//  ensures A[..s] + A[l..] == old(A[..s] + A[l..])
-//  ensures multiset(A[..]) == multiset(old(A[..]));
-//{
-//  var w := s;
-//  m, n := s, l;
-//  while w < n
-//    invariant 0 <= s <= m <= w <= n <= l <= A.Length;
-//    invariant forall i :: s <= i < m ==> A[i] < X;
-//    invariant forall i :: m <= i < w ==> A[i] == X;
-//    invariant forall i :: n <= i < l ==> A[i] > X;
-//    invariant A[..s] + A[l..] == old(A[..s] + A[l..])
-//    invariant multiset(A[..]) == multiset(old(A[..]));
-//  {
-//
-//    if A[w] < X {
-//      // Swap A[m] with A[w]
-//      A[m], A[w] := A[w], A[m];
-//      m := m + 1;
-//      w := w + 1;
-//    } else if A[w] == X {
-//      w := w + 1;
-//    } else if A[w] > X {
-//      // Swap A[n-1] with A[w]
-//      A[n-1], A[w] := A[w], A[n-1];
-//      n := n - 1;
-//    }
-//  }
-//}
-
 predicate inplace(a : array<int>, l : int, m : int, h : int)
   requires 0 <= l <= m <= h <= a.Length;
   reads a;
@@ -63,9 +25,7 @@ method Partition(A : array<int>, s : int, l : int, X : int) returns (m : int, n 
   requires 0 <= s <= l <= A.Length;
   requires 0 <  s <= l <= A.Length ==> inplace(A, 0, s, A.Length);
   requires 0 <= s <= l <  A.Length ==> inplace(A, 0, l, A.Length);
-
   modifies A;
-
   /* Expected behaviour */
   ensures 0 <= s <= m <= n <= l <= A.Length
   ensures forall i :: s <= i < m ==> A[i] < X;
@@ -78,7 +38,6 @@ method Partition(A : array<int>, s : int, l : int, X : int) returns (m : int, n 
   /* Assure partitioning is maintained */
   ensures 0 <  s <= l <= A.Length ==> inplace(A, 0, s, A.Length);
   ensures 0 <= s <= l <  A.Length ==> inplace(A, 0, l, A.Length);
-
 {
   var k := s;
   m, n := s, l;
@@ -94,7 +53,6 @@ method Partition(A : array<int>, s : int, l : int, X : int) returns (m : int, n 
     /* Assure partitioning is maintained */
     invariant 0 < s <= l <= A.Length ==> inplace(A, 0, s, A.Length);
     invariant 0 <= s <= l < A.Length ==> inplace(A, 0, l, A.Length);
-
     decreases n - k;
   {
 
